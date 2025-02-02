@@ -2,7 +2,10 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -32,42 +35,138 @@ func makeCell(content string, color string) (string) {
 	return fmt.Sprintf("^c#%s^ %s %s %s", color, leftSeperator, content, rightSeperator)
 }
 
-const timeFormat string = "03:04PM"
+func removeRight(s string) string {
+	return s[:len(s)-1]
+}
+
+func calcBattery() (string) {
+	const (
+		DyingPercent int 	= 25
+		OkPercent			= 40
+		FullPercent			= 70
+	)
+	const (
+		Empty string	= "󰂎"
+		Dying				= "󱊡"
+		Ok					= "󱊢"
+		Full				= "󱊣"
+		EmptyCharge		= "󱊤"
+		DyingCharge		= "󱊤"
+		OkCharge			= "󱊥"
+		FullCharge		= "󱊦"
+	)
+	
+	const batteryPercentFile string = "/sys/class/power_supply/BAT0/capacity"
+	const batteryStatusFile string = "/sys/class/power_supply/BAT0/status"
+
+	var color string = okColor
+	var percent int
+	var symbol string
+	var status bool = false // False is discharging
+	var err error
+	var data []byte // Temp variable for raw file data
+
+	// Get the current battery percent
+	data, err = os.ReadFile(batteryPercentFile)
+	if err != nil {
+		log.Println(err)
+		return makeCell("?!", errorColor)
+	}
+	percent, err = strconv.Atoi(removeRight(string(data)))
+	if err != nil {
+		log.Println(err)
+		return makeCell("?!", errorColor)
+	}
+
+	data, err = os.ReadFile(batteryStatusFile)
+	if err != nil {
+		log.Println(err)
+		return makeCell("?!", errorColor)
+	} else if data[0] == 'C' {
+		status = true
+	}
+
+	if status {
+		if percent >= FullPercent {
+			color = warnColor
+			symbol = FullCharge
+		} else if percent >= OkPercent {
+			symbol = OkCharge
+		} else if percent >= DyingPercent {
+			symbol = DyingCharge
+		} else {
+			symbol = EmptyCharge
+		}
+	} else {
+		if percent >= FullPercent {
+			symbol = Full
+		} else if percent >= OkPercent {
+			symbol = Ok
+		} else if percent >= DyingPercent {
+			symbol = Dying
+			color = warnColor
+		} else {
+			symbol = Empty
+			color = warnColor
+		}
+	}
+
+	var content string = fmt.Sprintf("%s %d%%", symbol, percent)
+
+	return makeCell(content, color)
+}
+
 func calcTime() (string) {
-	var time string = time.Now().Format(timeFormat)
-	return makeCell(time, nightColor)
+	const timeFormat string = "03:04"
+	const hourFormat string = "15"
+
+	var color string
+	var outTime string = time.Now().Format(timeFormat)
+	hour, _ := strconv.Atoi(time.Now().Format(hourFormat)) // Error should always be nil
+
+	if hour >= 12 {
+		outTime += "pm"
+	} else {
+		outTime += "am"
+	}
+
+	if 5 <= hour && 10 >= hour {
+		color = morningColor
+	} else if 11 <= hour && 18 >= hour {
+		color = dayColor
+	} else {
+		color = nightColor
+	}
+
+	return makeCell(outTime, color)
 }
 
 // Calculates the date and returns it as a cell
-const dateFormat string = "Mon Jan 02"
 func calcDate() (string) {
-	var date string = time.Now().Format(dateFormat)
-	return makeCell(date, dateColor)
+	const dateFormat string = "Mon Jan 02"
+	var rtrn string = time.Now().Format(dateFormat)
+	return makeCell(rtrn, dateColor)
 }
 
 // Sets the root name, setting the statusbar
-func setRootName(name string) (error) {
+func setRootName(name string) {
 	cmd := exec.Command("xsetroot", "-name", name)
 	err := cmd.Run()
 	if err != nil {
-		return err
+		log.Println(err)
 	}
-	return nil
 }
 
 func main() {
-	var err error = nil
-	var index int = 0
-	var status strings.Builder
-	for err == nil {
-		status.Write([]byte(calcTime()))
-		status.Write([]byte(calcDate()))
-		err = setRootName(status.String())
-		index++
+	for {
+		var status strings.Builder
+		status.WriteString(calcBattery())
+		status.WriteString(calcTime())
+		status.WriteString(calcDate())
 
-		status.Reset()
+		setRootName(status.String())
+
 		time.Sleep(tickrate)
 	}
-
-	panic(err)
 }
+
