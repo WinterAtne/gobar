@@ -8,10 +8,18 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/shirou/gopsutil/mem"
 )
 
 // Control
 const tickrate time.Duration = time.Second * 30
+var programs [](func() (string)) = [](func() (string)) {
+	calcRam,
+	calcBattery,
+	calcTime,
+	calcDate,
+}
 
 // Seperators
 const leftSeperator string = "["
@@ -37,6 +45,32 @@ func makeCell(content string, color string) (string) {
 
 func removeRight(s string) string {
 	return s[:len(s)-1]
+}
+
+func calcRam() (string) {
+	const (
+		warnAbove int 	= 75
+		errorAbove		= 90
+	)
+
+	const symbol string = " "
+
+	v, err := mem.VirtualMemory()
+	if err != nil {
+		log.Println(err)
+		return makeCell("?!", errorColor)
+	}
+
+	var color = okColor
+	var free int = int(v.UsedPercent)
+
+	if free >= errorAbove {
+		color = errorColor
+	} else if free >= warnAbove {
+		color = warnColor
+	}
+
+	return makeCell(symbol+strconv.Itoa(int(v.UsedPercent))+"%", color)
 }
 
 func calcBattery() (string) {
@@ -104,7 +138,6 @@ func calcBattery() (string) {
 			symbol = Ok
 		} else if percent >= DyingPercent {
 			symbol = Dying
-			color = warnColor
 		} else {
 			symbol = Empty
 			color = warnColor
@@ -160,9 +193,10 @@ func setRootName(name string) {
 func main() {
 	for {
 		var status strings.Builder
-		status.WriteString(calcBattery())
-		status.WriteString(calcTime())
-		status.WriteString(calcDate())
+
+		for _, f := range programs {
+			status.WriteString(f())
+		}
 
 		setRootName(status.String())
 
